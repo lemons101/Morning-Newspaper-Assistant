@@ -18,7 +18,7 @@ from morning_v2.models import utc_now_iso
 
 PROMPT_TEXT = """你是 AI 早报编辑。
 
-下面我会给你一组已经完成中文草稿的候选条目。请你基于内容质量和主题匹配度，选出最终 Top10，并给出排序。
+下面我会给你一组已经完成中文草稿的候选条目。每条都带有稳定 ID（rank_id / item_id）。请你基于内容质量和主题匹配度，选出最终 Top10，并给出排序。
 
 我们的主题是：AI 最新的技术进展和商业化落地。
 
@@ -29,10 +29,17 @@ PROMPT_TEXT = """你是 AI 早报编辑。
 
 不要猜测草稿之外的信息。
 如果不足 10 条，就按实际数量输出。
-只输出 JSON：
+优先按 rank_id 输出；如果实在不方便，也可以输出 item_id。不要只返回标题。
+只输出 JSON，格式如下二选一：
 
 {
-  "top10_titles": ["标题1", "标题2"]
+  "top10_rank_ids": ["ID1", "ID2"]
+}
+
+或
+
+{
+  "top10_item_ids": ["sha1:...", "sha1:..."]
 }
 """
 
@@ -73,7 +80,11 @@ def main() -> None:
 
 
 def _to_ranking_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    shortlist_rank = item.get("shortlist_rank")
+    rank_id = f"ID{shortlist_rank}" if shortlist_rank is not None else ""
     return {
+        "rank_id": rank_id,
+        "item_id": str(item.get("item_id", "")).strip(),
         "title": str(item.get("title", "")).strip(),
         "title_zh": str(item.get("title_zh", "")).strip(),
         "summary_main": str(item.get("summary_main", "")).strip(),
@@ -94,7 +105,8 @@ def _render_preview(items: List[Dict[str, Any]]) -> str:
     ]
     for idx, item in enumerate(items, 1):
         lines.append(
-            f"{idx}. {item.get('title_zh', '') or item.get('title', '')} "
+            f"{idx}. {item.get('rank_id', '')} | {item.get('item_id', '')} | "
+            f"{item.get('title_zh', '') or item.get('title', '')} "
             f"[{item.get('source_type', '')}]"
         )
     lines.append("")

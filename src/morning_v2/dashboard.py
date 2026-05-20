@@ -16,13 +16,13 @@ def write_static_dashboard(runtime_dir: Path, output_path: Path) -> Path:
 def build_dashboard_payload(runtime_dir: Path) -> Dict[str, Any]:
     collected = _read_json(runtime_dir / "collected_raw.json")
     shortlist = _read_json(runtime_dir / "shortlist.json")
-    drafted = _read_json(runtime_dir / "drafted_items.json")
     publishable = _read_json(runtime_dir / "top10_publishable.json")
     collect_report = _read_json(runtime_dir / "collect_report.json")
+    executive_mailbox = _read_json(runtime_dir / "executive_mailbox.json")
 
     top_items = [_to_display_item(item) for item in _safe_items(publishable)]
     source_health = _source_rows(collect_report)
-    mail_alerts = _build_alert_cards(runtime_dir, collect_report)
+    task_alerts = _mailbox_items(executive_mailbox)
 
     return {
         "generated_at": str(publishable.get("generated_at", "")).strip(),
@@ -32,12 +32,12 @@ def build_dashboard_payload(runtime_dir: Path) -> Dict[str, Any]:
             "top10_count": int(publishable.get("count", 0) or 0),
             "ai_selected": bool(top_items),
             "important_count": min(3, len(top_items)),
-            "urgent_task_count": len(mail_alerts),
+            "urgent_task_count": len(task_alerts),
         },
         "headline": "今日 AI 早报",
         "lead": _build_lead_bullets(top_items),
         "top_items": top_items,
-        "mail_alerts": mail_alerts,
+        "mail_alerts": task_alerts,
         "source_health": source_health,
     }
 
@@ -61,14 +61,15 @@ def _safe_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _to_display_item(item: Dict[str, Any]) -> Dict[str, Any]:
     rank = int(item.get("rank", 0) or 0)
+    title = str(item.get("title", "")).strip()
+    summary = str(item.get("summary", "")).strip()
     return {
         "rank": rank,
         "priority": _priority_from_rank(rank),
-        "title": str(item.get("title", "")).strip(),
-        "title_zh": str(item.get("title", "")).strip(),
-        "title_en": "",
-        "summary": str(item.get("summary", "")).strip(),
-        "summary_zh": str(item.get("summary", "")).strip(),
+        "title": title,
+        "title_zh": title,
+        "summary": summary,
+        "summary_zh": summary,
         "source_name": str(item.get("source_name", "")).strip(),
         "source_type": str(item.get("source_type", "")).strip(),
         "published_at": str(item.get("published_at", "")).strip(),
@@ -80,54 +81,39 @@ def _to_display_item(item: Dict[str, Any]) -> Dict[str, Any]:
 def _build_lead_bullets(items: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     output: List[Dict[str, str]] = []
     for item in items[:3]:
-        output.append({
-            "icon": str(item.get("topic_icon", "✨")),
-            "title": str(item.get("title_zh", "")).strip(),
-            "summary": _trim_text(str(item.get("summary_zh", "")).strip(), 120),
-        })
+        output.append(
+            {
+                "icon": str(item.get("topic_icon", "•")),
+                "title": str(item.get("title_zh", "")).strip(),
+                "summary": _trim_text(str(item.get("summary_zh", "")).strip(), 120),
+            }
+        )
     return output
 
 
-def _build_alert_cards(runtime_dir: Path, collect_report: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _mailbox_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    items = payload.get("items", []) if isinstance(payload, dict) else []
+    if not isinstance(items, list):
+        return []
+
     cards: List[Dict[str, Any]] = []
-
-    required_files = [
-        ("标题粗筛结果待回填", runtime_dir / "title_shortlist_result.json", "需要先完成标题粗筛结果回填，后续 shortlist 与 draft_input 才能稳定衔接。"),
-        ("Top10 精排结果待回填", runtime_dir / "top10_ranking_result.json", "需要补齐最终排序结果，才能稳定生成最新的 top10_publishable.json。"),
-    ]
-    for label, path, summary in required_files:
-        if path.exists():
+    for idx, item in enumerate(items, 1):
+        if not isinstance(item, dict):
             continue
-        cards.append({
-            "rank": len(cards) + 1,
-            "priority": "Urgent",
-            "title_zh": label,
-            "summary_zh": summary,
-            "source_name": "Pipeline",
-            "published_at": "",
-            "url": "",
-            "topic_icon": "⚠️",
-        })
-
-    for row in collect_report.get("sources", []):
-        if not isinstance(row, dict):
-            continue
-        status = str(row.get("status", "")).strip()
-        if status == "ok":
-            continue
-        source_id = str(row.get("source_id", "")).strip() or "unknown_source"
-        error = str(row.get("error", "")).strip() or "该来源本轮抓取失败，需要检查配置或运行环境。"
-        cards.append({
-            "rank": len(cards) + 1,
-            "priority": "Important",
-            "title_zh": f"来源异常：{source_id}",
-            "summary_zh": _trim_text(error, 120),
-            "source_name": "Collector",
-            "published_at": "",
-            "url": "",
-            "topic_icon": "🛠️",
-        })
-
+        priority = str(item.get("priority", "Important")).strip() or "Important"
+        cards.append(
+            {
+                "rank": int(item.get("rank", idx) or idx),
+                "priority": priority,
+                "title_zh": str(item.get("title_zh") or item.get("title") or "(untitled)").strip(),
+                "summary_zh": str(item.get("summary_zh") or item.get("summary") or "").strip(),
+                "source_name": str(item.get("source_name", "邮箱")).strip() or "邮箱",
+                "published_at": str(item.get("published_at", "")).strip(),
+                "url": str(item.get("url", "")).strip(),
+                "topic_icon": str(item.get("topic_icon", "📤")).strip() or "📤",
+            }
+        )
+    cards.sort(key=lambda row: int(row.get("rank", 10**9)))
     return cards
 
 
@@ -137,11 +123,13 @@ def _source_rows(collect_report: Dict[str, Any]) -> List[Dict[str, Any]]:
         if not isinstance(row, dict):
             continue
         status = str(row.get("status", "")).strip()
-        rows.append({
-            "source_id": str(row.get("source_id", "")).strip(),
-            "items": int(row.get("item_count", 0) or 0),
-            "status": "正常" if status == "ok" else "异常",
-        })
+        rows.append(
+            {
+                "source_id": str(row.get("source_id", "")).strip(),
+                "items": int(row.get("item_count", 0) or 0),
+                "status": "正常" if status == "ok" else "异常",
+            }
+        )
     return rows
 
 
@@ -152,6 +140,7 @@ def _render_html(data: Dict[str, Any]) -> str:
     top_items = data.get("top_items", [])
     mail_alerts = data.get("mail_alerts", [])
     source_health = data.get("source_health", [])
+    generated_at = escape(str(data.get("generated_at", "")))
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -201,7 +190,7 @@ def _render_html(data: Dict[str, Any]) -> str:
   <div class="wrap">
     <div class="hero">
       <h1>{escape(str(headline))}</h1>
-      <div class="muted">聚焦近 3 天 AI 技术与商业信号 · 更新时间：{escape(str(data.get("generated_at", "")))}</div>
+      <div class="muted">聚焦近 3 天 AI 技术与商业信号 | 更新时间：{generated_at}</div>
       {_lead_cards(lead)}
     </div>
     <div class="metrics">
@@ -209,8 +198,8 @@ def _render_html(data: Dict[str, Any]) -> str:
       {_metric("候选池", overview.get("candidate_count", 0))}
       {_metric("Top10", overview.get("top10_count", 0))}
       {_metric("AI 精选", "是" if overview.get("ai_selected") else "否")}
-      {_metric("重要信号", overview.get("important_count", 0))}
-      {_metric("异常来源", overview.get("urgent_task_count", 0))}
+      {_metric("重点信号", overview.get("important_count", 0))}
+      {_metric("今日待办", overview.get("urgent_task_count", 0))}
     </div>
     <div class="grid">
       <section class="panel">
@@ -219,8 +208,8 @@ def _render_html(data: Dict[str, Any]) -> str:
       </section>
       <aside>
         <section class="panel">
-          <h2>紧急事务</h2>
-          {_items(mail_alerts, empty_text="暂无流程状态。")}
+          <h2>今日待办提醒</h2>
+          {_items(mail_alerts, empty_text="今天暂无需要提醒的事项。")}
         </section>
         <br>
         <section class="panel">
@@ -242,12 +231,10 @@ def _metric(label: str, value: Any) -> str:
 def _lead_cards(items: Iterable[Dict[str, Any]]) -> str:
     cards = []
     for item in items:
-        icon = escape(str(item.get("icon", "✨")))
+        icon = escape(str(item.get("icon", "•")))
         title = escape(str(item.get("title", "")))
         summary = escape(str(item.get("summary", "")))
-        cards.append(
-            f'<div class="leadcard"><div class="leadcard-title">{icon} {title}</div><p class="leadcard-summary">{summary}</p></div>'
-        )
+        cards.append(f'<div class="leadcard"><div class="leadcard-title">{icon} {title}</div><p class="leadcard-summary">{summary}</p></div>')
     if not cards:
         return ""
     return f'<div class="leadbox"><div class="leadtitle">今日看点</div><div class="leadgrid">{"".join(cards)}</div></div>'
@@ -257,21 +244,25 @@ def _items(items: Iterable[Dict[str, Any]], *, empty_text: str) -> str:
     chunks = []
     for item in items:
         priority = escape(str(item.get("priority", "FYI")))
-        icon = escape(str(item.get("topic_icon", "✨")))
+        icon = escape(str(item.get("topic_icon", "•")))
         title = escape(str(item.get("title_zh") or item.get("title", "(untitled)")))
         source = escape(str(item.get("source_name", "-")))
         summary = escape(str(item.get("summary_zh") or item.get("summary", "")))
         published_at = escape(str(item.get("published_at", "")))
         url = str(item.get("url", "")).strip()
-        link = f'<a class="link" href="{escape(url)}" target="_blank" rel="noopener noreferrer">访问链接</a>' if url else '<span class="nolink">无外部链接</span>'
+        link = (
+            f'<a class="link" href="{escape(url)}" target="_blank" rel="noopener noreferrer">访问链接</a>'
+            if url
+            else '<span class="nolink">无外部链接</span>'
+        )
         chunks.append(
             f"""<div class="item">
   <div class="head"><span>#{escape(str(item.get("rank", "-")))}</span><span class="badge {priority}">{priority}</span><span class="muted">{source}</span></div>
   <div class="title">{icon} {title}</div>
-  <p class="summary"><span class="label">主要内容:</span>{summary}</p>
+  <p class="summary">{summary}</p>
   <div class="meta">
-    <div class="row"><span class="label">来源</span> · {source}</div>
-    <div class="row"><span class="label">发布时间</span> · {published_at or "-"}</div>
+    <div class="row"><span class="label">来源</span> | {source}</div>
+    <div class="row"><span class="label">发布时间</span> | {published_at or "-"}</div>
   </div>
   <div>{link}</div>
 </div>"""
@@ -296,19 +287,30 @@ def _priority_from_rank(rank: int) -> str:
 def _topic_icon(item: Dict[str, Any]) -> str:
     source_type = str(item.get("source_type", "")).strip()
     title = str(item.get("title", "")).lower()
+    url = str(item.get("url", "")).lower()
     if source_type == "github_high_stars" and "agent" in title:
         return "🤖"
     if source_type == "github_high_stars":
-        return "📦"
+        return "🧰"
     if source_type == "hackernews_top":
         return "📰"
     if source_type == "rss":
-        return "🏛️"
-    return "✨"
+        return "🌐"
+    if source_type == "tavily_skill":
+        if "github.com" in url:
+            return "🧰"
+        if "news.ycombinator.com" in url:
+            return "📰"
+        if any(host in url for host in ["openai.com", "anthropic.com", "deepmind.google", "blog.google", "ai.meta.com", "huggingface.co", "arxiv.org"]):
+            return "🧠"
+        if any(host in url for host in ["linkedin.com", "finance.yahoo.com", "reuters.com", "bloomberg.com", "cnbc.com", "ft.com", "wsj.com", "techcrunch.com", "theverge.com"]):
+            return "💼"
+        return "🔎"
+    return "•"
 
 
 def _trim_text(text: str, limit: int) -> str:
     clean = " ".join(str(text or "").split()).strip()
     if len(clean) <= limit:
         return clean
-    return clean[: limit - 1].rstrip(" ，,;；:：") + "…"
+    return clean[: limit - 1].rstrip(" ，,；;。") + "…"

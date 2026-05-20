@@ -61,6 +61,20 @@ def main() -> None:
         seen_titles.add(title)
         drafted_items.append(_merge_item(source_item, draft))
 
+    # Backfill from shortlist when draft results are missing so downstream Top10
+    # still has enough candidates to rank. Keep source order via shortlist_rank.
+    if len(drafted_items) < 10:
+        for item in input_items:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title", "")).strip()
+            if not title or title in seen_titles:
+                continue
+            seen_titles.add(title)
+            drafted_items.append(_fallback_merge_item(item))
+            if len(drafted_items) >= max(10, len(input_items)):
+                break
+
     drafted_items.sort(key=lambda row: int(row.get("shortlist_rank", 10**9)))
     write_json(Path(args.output), {
         "generated_at": utc_now_iso(),
@@ -86,6 +100,26 @@ def _merge_item(source_item: Dict[str, Any], draft: Dict[str, Any]) -> Dict[str,
         "url": str(draft.get("url", "")).strip() or str(source_item.get("url", "")).strip(),
         "source_type": str(source_item.get("source_type", "")).strip(),
         "source_name": str(source_item.get("source_name", "")).strip(),
+    }
+
+
+def _fallback_merge_item(source_item: Dict[str, Any]) -> Dict[str, Any]:
+    source_title = str(source_item.get("title", "")).strip()
+    source_name = str(source_item.get("source_name", "")).strip()
+    source_type = str(source_item.get("source_type", "")).strip()
+    body_text = str(source_item.get("body_text", "") or "").strip()
+    raw_snippet = str(source_item.get("raw_snippet", "") or "").strip()
+    summary = raw_snippet or body_text[:220].strip() or f"这条内容与 {source_name or source_type or 'AI'} 相关，已进入候选池，当前先保留用于后续 Top10 排序。"
+    return {
+        "shortlist_rank": source_item.get("shortlist_rank"),
+        "item_id": str(source_item.get("item_id", "")).strip(),
+        "title": source_title,
+        "title_zh": source_title,
+        "summary_main": summary,
+        "published_at": str(source_item.get("published_at", "")).strip(),
+        "url": str(source_item.get("url", "")).strip(),
+        "source_type": source_type,
+        "source_name": source_name,
     }
 
 

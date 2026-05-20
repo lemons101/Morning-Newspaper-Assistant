@@ -37,11 +37,13 @@ def main() -> None:
     input_payload = json.loads(input_path.read_text(encoding="utf-8"))
     selected_payload = json.loads(selected_path.read_text(encoding="utf-8"))
     items = input_payload.get("items", []) if isinstance(input_payload, dict) else []
-    selected_titles = selected_payload.get("selected_titles", []) if isinstance(selected_payload, dict) else []
-    if not isinstance(items, list) or not isinstance(selected_titles, list):
+    ranked_titles = []
+    if isinstance(selected_payload, dict):
+        ranked_titles = selected_payload.get("ranked_titles", []) or selected_payload.get("selected_titles", [])
+    if not isinstance(items, list) or not isinstance(ranked_titles, list):
         raise SystemExit("invalid input format")
 
-    selected_map = {str(title).strip(): idx for idx, title in enumerate(selected_titles, 1) if str(title).strip()}
+    selected_map = {str(title).strip(): idx for idx, title in enumerate(ranked_titles, 1) if str(title).strip()}
     shortlist: List[Dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
@@ -62,7 +64,7 @@ def main() -> None:
         "count": len(shortlist),
         "items": shortlist,
     })
-    write_text(Path(args.report), _render_report(shortlist, selected_titles))
+    write_text(Path(args.report), _render_report(shortlist, ranked_titles))
     print(f"shortlist items={len(shortlist)}")
     print(f"wrote {args.output}")
 
