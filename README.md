@@ -111,25 +111,71 @@ runtime/dashboard.html
 
 ```text
 Morning-Newspaper-Assistant/
-  config/
-    sources.yaml                         # 来源、邮箱、运行窗口配置
-  docs/                                  # 重构计划、来源策略等设计文档
-  references/
-    editorial_rules.md                   # 编辑规则参考
-  runtime/                               # 流水线产物目录，通常不手写源码逻辑
-  scripts/                               # 每个流水线步骤的命令行入口
-  skills/
-    morning-newspaper-assistant-skill/   # OpenClaw/Codex skill 编排入口
-  src/morning_v2/                        # 核心 Python 包
-    collectors/                          # 各类来源采集器
-    common.py                            # JSON/YAML/env/HTTP 等通用工具
-    content_fetch.py                     # 正文抓取与清洗
-    dashboard.py                         # 看板数据组装和静态 HTML 渲染
-    mailbox.py                           # 邮箱提醒链路
-    models.py                            # RawItem 等数据模型
-  dashboard_app.py                       # Streamlit 动态看板
-  run_dashboard.cmd                      # Windows 本地看板启动脚本
-  requirements.txt
+├── config/
+│   └── sources.yaml                         # 新闻源、搜索主题、邮箱提醒、运行窗口配置
+├── docs/
+│   ├── source_strategy.md                   # 来源策略与覆盖范围说明
+│   ├── rewrite_plan.md                      # README/文档重写计划
+│   └── pipeline_rebuild_plan.md             # 早报流水线重构计划
+├── references/
+│   └── editorial_rules.md                   # 早报编辑规则、筛选口径、成稿风格参考
+├── runtime/                                 # 每日运行产物目录，主流程围绕这里读写
+│   ├── collected_raw.json                   # 原始候选池，来自 GitHub/HN/RSS/搜索结果
+│   ├── collect_report.json                  # 各来源采集状态、数量、异常信息
+│   ├── content_enriched.json                # 已抓正文的候选，含 fetch_status/body_text
+│   ├── title_candidates.json                # 标题粗筛输入，只保留标题和基础元信息
+│   ├── title_shortlist_prompt.txt           # 标题粗筛 prompt
+│   ├── title_shortlist_result.json          # 人工/模型回填的标题粗筛结果
+│   ├── shortlist.json                       # 粗筛后候选池，重新带回正文和来源信息
+│   ├── draft_input.json                     # 中文成稿输入，含正文片段
+│   ├── draft_prompt.txt                     # 中文成稿 prompt
+│   ├── draft_result.json                    # 人工/模型回填的中文标题和摘要
+│   ├── drafted_items.json                   # 已完成中文成稿的候选
+│   ├── top10_ranking_input.json             # Top10 精排输入
+│   ├── top10_ranking_prompt.txt             # Top10 精排 prompt
+│   ├── top10_ranking_result.json            # 人工/模型回填的最终排序
+│   ├── top10_publishable.json               # 最终发布层数据，页面只读这个文件
+│   ├── executive_mailbox.json               # 页面右侧邮箱提醒卡片
+│   ├── mail_event_queue.json                # 邮件中识别出的未来事项队列
+│   └── dashboard.html                       # 可直接打开的静态早报页面
+├── scripts/
+│   ├── collect_mailbox.py                   # 采集 163 邮箱提醒，生成提醒卡片和事项队列
+│   ├── collect_raw.py                       # 采集新闻候选，写 collected_raw/collect_report
+│   ├── enrich_content.py                    # 对候选 URL 做正文抓取和网页噪音清洗
+│   ├── prepare_title_shortlist.py           # 准备标题粗筛输入和 prompt
+│   ├── apply_title_shortlist.py             # 应用标题粗筛结果，生成 shortlist
+│   ├── prepare_draft_input.py               # 准备中文成稿输入和 prompt
+│   ├── apply_draft_results.py               # 应用中文成稿结果，生成 drafted_items
+│   ├── prepare_top10_ranking.py             # 准备 Top10 精排输入和 prompt
+│   ├── apply_top10_ranking.py               # 应用最终排序，生成 top10_publishable
+│   ├── build_dashboard.py                   # 根据发布层数据生成静态 HTML 看板
+│   └── run_tavily_plan.py                   # 执行/衔接 Tavily 搜索计划结果
+├── skills/
+│   └── morning-newspaper-assistant-skill/
+│       ├── SKILL.md                         # OpenClaw/Codex 调用说明
+│       └── scripts/
+│           └── run_morning_report_v2.py     # 一键编排入口，会停在缺少回填文件的步骤
+├── src/
+│   └── morning_v2/
+│       ├── collectors/
+│       │   ├── orchestrator.py              # 统一调度各来源采集器、过滤时间窗口、去重
+│       │   ├── github.py                    # GitHub Search API 高星项目采集
+│       │   ├── hackernews.py                # Hacker News Firebase API 热门故事采集
+│       │   ├── rss.py                       # RSS/Atom XML 解析采集
+│       │   ├── cn_media.py                  # 中文媒体搜索结果转换为 RawItem
+│       │   ├── baidu_search.py              # 调用外部 baidu-search 脚本
+│       │   ├── tavily.py                    # 生成 Tavily 搜索计划并读取搜索结果
+│       │   └── items.py                     # RawItem 构造与候选去重工具
+│       ├── common.py                        # JSON/YAML/.env/HTTP/文本清洗通用函数
+│       ├── content_fetch.py                 # 正文抓取、主体抽取、网页噪音过滤
+│       ├── dashboard.py                     # 看板 payload 组装与静态 HTML 渲染
+│       ├── mailbox.py                       # IMAP/POP3 邮箱提醒采集与事项识别
+│       └── models.py                        # RawItem 数据模型和 item_id 生成
+├── dashboard_app.py                         # Streamlit 动态看板，读取 runtime 数据
+├── run_dashboard.cmd                        # Windows 本地动态看板启动脚本
+├── .env.example                             # 本地环境变量示例
+├── requirements.txt                         # 主采集链路 Python 依赖
+└── README.md
 ```
 
 ## 核心数据产物
