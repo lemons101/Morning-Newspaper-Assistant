@@ -58,10 +58,16 @@ skills/morning-newspaper-assistant-skill/
 5. 正文成稿输入准备
 6. 成稿结果应用
 7. Top10 精排输入准备
-8. 精排结果应用
+8. 对粗筛后的候选做最终排序，并取前 10 条
 9. 静态页面生成
 
 如果中间需要模型或人工回填结果文件，skill 会保留 prompt 与输入文件，并在返回结果里明确指出缺的是哪一步。
+
+其中：
+
+- 标题粗筛不是强行凑满 15 条，而是先保留一小批最值得继续读正文的候选，通常不超过 15 条。
+- 正常情况下，标题粗筛应尽量保留 10 到 15 条，给后续成稿和精排留下足够候选。
+- Top10 精排不是重新做一轮粗选，而是对粗筛并成稿后的候选做最终排序，然后取前 10 条进入页面。
 
 ## 页面查看方式
 
@@ -73,8 +79,74 @@ skills/morning-newspaper-assistant-skill/
    - `dashboard_app.py`
    - `run_dashboard.cmd`
    - 默认地址：`http://127.0.0.1:8502`
+3. 对外固定分享页（8510）：
+   - 启动脚本：`scripts/serve_dashboard_8510.sh`
+   - 固定只服务 `Morning-Newspaper-Assistant/runtime/dashboard.html`
 
 如果只想快速检查结果，直接打开静态页面即可；如果希望像旧项目一样起一个本地网页服务，就运行 `run_dashboard.cmd`。
+
+## 正式运行入口（Assistant Only）
+
+正式产物现在应只通过 Assistant 项目生成，不再通过 Manager 项目脚本间接产出。
+
+推荐入口：
+
+```bash
+bash scripts/run_assistant_only.sh
+```
+
+它会调用：
+
+```bash
+python scripts/run_daily_pipeline.py
+```
+
+约束：
+- 正式页面、正式 runtime、8510 分享页都以 `Morning-Newspaper-Assistant` 为唯一来源。
+- `Morning-Newspaper-Manager` 仅保留为历史参考或实验链，不应再作为正式页面生成入口。
+
+## 邮箱提醒链路
+
+这个项目现在除了公开早报主链，还带了一条独立的助手侧提醒链路：
+
+`163邮箱 -> mail_event_queue.json -> executive_mailbox.json -> 页面右侧提醒`
+
+它的定位不是参与 Top10 排序，而是帮助你每天顺手看“今天有没有要忙的事”。
+
+### 需要的配置
+
+在项目根目录放一个 `.env` 文件，至少包含：
+
+```text
+IMAP_USER=你的163邮箱地址
+IMAP_PASS=你的163邮箱客户端授权码
+```
+
+也可以直接复制 `.env.example` 再改成自己的值。
+
+注意：`IMAP_PASS` 用的是 163 邮箱后台生成的客户端授权码，不是网页登录密码。
+
+163 邮箱默认连接配置已经写在 `config/sources.yaml` 里：
+
+- `imap.163.com:993`
+- `pop.163.com:995`
+
+### 会生成的文件
+
+- `runtime/mail_event_queue.json`
+  - 保存从邮件里识别出的未来会议、截止、提醒事项队列
+- `runtime/executive_mailbox.json`
+  - 保存今天页面右侧直接展示的提醒卡片
+- `runtime/mailbox_collect_report.json`
+  - 保存本次邮箱采集状态，方便排查
+
+### 单独测试邮箱链路
+
+```bash
+python scripts/collect_mailbox.py
+```
+
+如果只想临时关闭邮箱提醒，把 `config/sources.yaml` 里的 `assistant_mailbox.enabled` 改成 `false` 即可。
 
 ## 当前定位
 
