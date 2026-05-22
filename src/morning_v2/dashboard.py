@@ -17,24 +17,33 @@ def build_dashboard_payload(runtime_dir: Path) -> Dict[str, Any]:
     collected = _read_json(runtime_dir / "collected_raw.json")
     shortlist = _read_json(runtime_dir / "shortlist.json")
     publishable = _read_json(runtime_dir / "top10_publishable.json")
+    final_newspaper = _read_json(runtime_dir / "final_newspaper.json")
     collect_report = _read_json(runtime_dir / "collect_report.json")
     executive_mailbox = _read_json(runtime_dir / "executive_mailbox.json")
 
-    top_items = [_to_display_item(item) for item in _safe_items(publishable)]
+    primary_payload = final_newspaper if _safe_items(final_newspaper) else publishable
+    top_items = [_to_display_item(item) for item in _safe_items(primary_payload)]
     source_health = _source_rows(collect_report)
     task_alerts = _mailbox_items(executive_mailbox)
 
+    generated_at = (
+        str(primary_payload.get("generated_at", "")).strip()
+        or str(final_newspaper.get("generated_at", "")).strip()
+        or str(publishable.get("generated_at", "")).strip()
+    )
+    top10_count = int(primary_payload.get("count", 0) or len(top_items) or 0)
+
     return {
-        "generated_at": str(publishable.get("generated_at", "")).strip(),
+        "generated_at": generated_at,
         "overview": {
             "collected_total": int(collected.get("count", 0) or 0),
             "candidate_count": int(shortlist.get("count", 0) or 0),
-            "top10_count": int(publishable.get("count", 0) or 0),
+            "top10_count": top10_count,
             "ai_selected": bool(top_items),
             "important_count": min(3, len(top_items)),
             "urgent_task_count": len(task_alerts),
         },
-        "headline": "今日 AI 早报",
+        "headline": str(final_newspaper.get("headline", "")).strip() or "今日 AI 早报",
         "lead": _build_lead_bullets(top_items),
         "top_items": top_items,
         "mail_alerts": task_alerts,
@@ -61,14 +70,23 @@ def _safe_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _to_display_item(item: Dict[str, Any]) -> Dict[str, Any]:
     rank = int(item.get("rank", 0) or 0)
-    title = str(item.get("title", "")).strip()
-    summary = str(item.get("summary", "")).strip()
+    title = (
+        str(item.get("title_zh", "")).strip()
+        or str(item.get("card_title", "")).strip()
+        or str(item.get("title", "")).strip()
+    )
+    summary = (
+        str(item.get("summary_main", "")).strip()
+        or str(item.get("card_summary", "")).strip()
+        or str(item.get("summary_zh", "")).strip()
+        or str(item.get("summary", "")).strip()
+    )
     return {
         "rank": rank,
-        "priority": _priority_from_rank(rank),
-        "title": title,
+        "priority": str(item.get("priority", "")).strip() or _priority_from_rank(rank),
+        "title": str(item.get("title", "")).strip() or title,
         "title_zh": title,
-        "summary": summary,
+        "summary": str(item.get("summary", "")).strip() or summary,
         "summary_zh": summary,
         "source_name": str(item.get("source_name", "")).strip(),
         "source_type": str(item.get("source_type", "")).strip(),

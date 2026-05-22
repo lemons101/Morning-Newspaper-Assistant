@@ -41,39 +41,34 @@ def main() -> None:
     if not isinstance(input_items, list) or not isinstance(drafts, list):
         raise SystemExit("invalid input format")
 
-    input_map = {
+    rank_input_map = {
+        str(item.get("rank_id", "")).strip(): item
+        for item in input_items
+        if isinstance(item, dict) and str(item.get("rank_id", "")).strip()
+    }
+    title_input_map = {
         str(item.get("title", "")).strip(): item
         for item in input_items
         if isinstance(item, dict) and str(item.get("title", "")).strip()
     }
 
     drafted_items: List[Dict[str, Any]] = []
-    seen_titles: set[str] = set()
+    seen_keys: set[str] = set()
     for draft in drafts:
         if not isinstance(draft, dict):
             continue
+        rank_id = str(draft.get("rank_id", "")).strip()
         title = str(draft.get("title", "")).strip()
-        if not title or title in seen_titles:
+        dedupe_key = rank_id or title
+        if not dedupe_key or dedupe_key in seen_keys:
             continue
-        source_item = input_map.get(title)
+        source_item = rank_input_map.get(rank_id) if rank_id else None
+        if not source_item and title:
+            source_item = title_input_map.get(title)
         if not source_item:
             continue
-        seen_titles.add(title)
+        seen_keys.add(dedupe_key)
         drafted_items.append(_merge_item(source_item, draft))
-
-    # Backfill from shortlist when draft results are missing so downstream Top10
-    # still has enough candidates to rank. Keep source order via shortlist_rank.
-    if len(drafted_items) < 10:
-        for item in input_items:
-            if not isinstance(item, dict):
-                continue
-            title = str(item.get("title", "")).strip()
-            if not title or title in seen_titles:
-                continue
-            seen_titles.add(title)
-            drafted_items.append(_fallback_merge_item(item))
-            if len(drafted_items) >= max(10, len(input_items)):
-                break
 
     drafted_items.sort(key=lambda row: int(row.get("shortlist_rank", 10**9)))
     write_json(Path(args.output), {
@@ -90,8 +85,13 @@ def main() -> None:
 
 def _merge_item(source_item: Dict[str, Any], draft: Dict[str, Any]) -> Dict[str, Any]:
     source_title = str(source_item.get("title", "")).strip()
+    shortlist_rank = source_item.get("shortlist_rank")
+    source_rank_id = str(source_item.get("rank_id", "")).strip()
+    draft_rank_id = str(draft.get("rank_id", "")).strip()
+    rank_id = source_rank_id or draft_rank_id or (f"ID{shortlist_rank}" if shortlist_rank is not None else "")
     return {
-        "shortlist_rank": source_item.get("shortlist_rank"),
+        "shortlist_rank": shortlist_rank,
+        "rank_id": rank_id,
         "item_id": str(source_item.get("item_id", "")).strip(),
         "title": source_title,
         "title_zh": str(draft.get("title_zh", "")).strip() or source_title,
@@ -100,26 +100,6 @@ def _merge_item(source_item: Dict[str, Any], draft: Dict[str, Any]) -> Dict[str,
         "url": str(draft.get("url", "")).strip() or str(source_item.get("url", "")).strip(),
         "source_type": str(source_item.get("source_type", "")).strip(),
         "source_name": str(source_item.get("source_name", "")).strip(),
-    }
-
-
-def _fallback_merge_item(source_item: Dict[str, Any]) -> Dict[str, Any]:
-    source_title = str(source_item.get("title", "")).strip()
-    source_name = str(source_item.get("source_name", "")).strip()
-    source_type = str(source_item.get("source_type", "")).strip()
-    body_text = str(source_item.get("body_text", "") or "").strip()
-    raw_snippet = str(source_item.get("raw_snippet", "") or "").strip()
-    summary = raw_snippet or body_text[:220].strip() or f"这条内容与 {source_name or source_type or 'AI'} 相关，已进入候选池，当前先保留用于后续 Top10 排序。"
-    return {
-        "shortlist_rank": source_item.get("shortlist_rank"),
-        "item_id": str(source_item.get("item_id", "")).strip(),
-        "title": source_title,
-        "title_zh": source_title,
-        "summary_main": summary,
-        "published_at": str(source_item.get("published_at", "")).strip(),
-        "url": str(source_item.get("url", "")).strip(),
-        "source_type": source_type,
-        "source_name": source_name,
     }
 
 

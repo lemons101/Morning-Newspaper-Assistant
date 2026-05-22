@@ -196,6 +196,10 @@ def _message_to_records(source: Dict[str, Any], blob: bytes) -> Tuple[Dict[str, 
         action=action,
     )
 
+    event_date = _parse_date(compact_text(action.get("event_date"))) if action else None
+    if event_date is not None and event_date < datetime.now(timezone.utc).astimezone().date():
+        return None, None
+
     priority, _ = _classify_mail(source, sender=sender, subject=subject, body=body, action_hit=str(action.get("label", "")))
     if priority not in {"Urgent", "Important"}:
         return None, event
@@ -333,20 +337,24 @@ def _detect_action(source: Dict[str, Any], *, subject: str, body: str) -> Dict[s
     relative = _relative_date_hit(lower)
     if relative:
         event_date = _relative_date_to_date(relative, today)
+        delta = (event_date - today).days
         return {
             "label": relative,
             "event_date": event_date.isoformat(),
-            "is_due": 0 <= (event_date - today).days <= emit_window_days,
+            "is_due": 0 <= delta <= emit_window_days,
+            "is_past": delta < 0,
         }
 
-    for candidate in _extract_candidate_dates(text, today.year):
-        delta = (candidate - today).days
-        if delta >= 0:
-            return {
-                "label": candidate.isoformat(),
-                "event_date": candidate.isoformat(),
-                "is_due": delta <= emit_window_days,
-            }
+    candidates = _extract_candidate_dates(text, today.year)
+    if candidates:
+        nearest = min(candidates, key=lambda candidate: abs((candidate - today).days))
+        delta = (nearest - today).days
+        return {
+            "label": nearest.isoformat(),
+            "event_date": nearest.isoformat(),
+            "is_due": 0 <= delta <= emit_window_days,
+            "is_past": delta < 0,
+        }
     return {}
 
 
